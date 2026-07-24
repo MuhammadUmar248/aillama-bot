@@ -104,13 +104,16 @@ Summary: {story['summary']}
 Write:
 1. hook_title: a short punchy hook for the image overlay (max 8 words, no hashtags, high energy)
 2. caption: an Instagram caption (3-5 sentences, engaging, plain language, 1-2 emojis,
-   ends with a question or call-to-action), followed on a new line by 6-10 relevant hashtags
+   ends with a question or call-to-action), followed by 6-10 relevant hashtags
+   IN THE SAME "caption" STRING (hashtags go inside caption, not a separate field)
 3. image_prompt: max 15 words describing an ABSTRACT visual for this topic
    (no text, no logos, no real people, futuristic/tech aesthetic)
 
-Respond with ONLY valid JSON, no markdown fences, no extra words.
+Respond with ONLY a single valid JSON object and nothing else — no markdown
+fences, no commentary, no alternate versions, no explanation before or after it.
 Inside the JSON string values, any line break MUST be written as the two
 characters backslash-n (a JSON-escaped newline) — never a literal line break.
+The JSON object must have EXACTLY these three keys, no others:
 {{"hook_title": "...", "caption": "...", "image_prompt": "..."}}
 """
     resp = requests.post(
@@ -119,7 +122,8 @@ characters backslash-n (a JSON-escaped newline) — never a literal line break.
         json={
             "model": "llama-3.3-70b-versatile",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.8,
+            "temperature": 0.6,
+            "response_format": {"type": "json_object"},
         },
         timeout=60,
     )
@@ -132,15 +136,26 @@ characters backslash-n (a JSON-escaped newline) — never a literal line break.
         if text.lower().startswith("json"):
             text = text[4:].strip()
 
-    # Groq/Llama sometimes puts literal newlines or other raw control
-    # characters inside JSON string values (e.g. in the caption), which
-    # breaks Python's strict JSON parser. strict=False allows control
-    # characters inside strings instead of raising JSONDecodeError.
+    # Sometimes the model still adds extra text/objects after the first JSON
+    # object (e.g. "a better version would be {...}"). raw_decode() parses
+    # just the first valid JSON value and tells us where it ends, so we can
+    # ignore anything after it instead of erroring out on "Extra data".
+    # strict=False also tolerates stray raw control characters (like literal
+    # newlines) inside string values.
+    decoder = json.JSONDecoder(strict=False)
     try:
-        return json.loads(text, strict=False)
-    except json.JSONDecodeError as e:
+        obj, _end_index = decoder.raw_decode(text)
+    except json.JSONDecodeError:
         print("Raw model output that failed to parse:\n", text)
         raise
+
+    # Guard against missing keys (e.g. if the model used "hashtags" as a
+    # separate field instead of folding it into "caption")
+    for key in ("hook_title", "caption", "image_prompt"):
+        if key not in obj:
+            raise ValueError(f"Model response missing required key '{key}': {obj}")
+
+    return obj
 
 
 # ---------------------------------------------------------------------------
