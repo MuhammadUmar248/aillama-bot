@@ -1,11 +1,14 @@
 """
 publish.py
-Step 2 of the daily pipeline. Runs AFTER generate.py's output image has been
-committed & pushed to GitHub (so it's reachable at a public raw URL).
+Step 2 of the daily pipeline. Runs AFTER generate.py's slide images have
+been committed & pushed to GitHub (so they're reachable at public raw URLs).
 
-Reads pending_post.json, posts to Instagram via the Graph API (two-step:
-create media container, then publish it), and appends the story link to
-posted.json so it's never reposted.
+Reads pending_post.json (a list of image_urls + one caption), posts them to
+Instagram as a CAROUSEL (multi-slide post):
+  1. Create one "carousel item" container per slide image
+  2. Create a parent container of type CAROUSEL referencing all the items
+  3. Publish the parent container
+Then appends the story link to posted.json so it's never reposted.
 """
 
 import json
@@ -18,6 +21,9 @@ IG_USER_ID = os.environ["IG_USER_ID"]
 IG_ACCESS_TOKEN = os.environ["IG_ACCESS_TOKEN"]
 POSTED_FILE = "posted.json"
 PENDING_FILE = "pending_post.json"
+
+# Using the Instagram API with Instagram Login (graph.instagram.com).
+BASE_URL = f"https://graph.instagram.com/v20.0/{IG_USER_ID}"
 
 
 def load_posted():
@@ -32,35 +38,54 @@ def save_posted(posted):
         json.dump(posted, f, indent=2)
 
 
-def post_to_instagram(image_url, caption):
-    # Using the Instagram API with Instagram Login (graph.instagram.com),
-    # not the Facebook Login variant (graph.facebook.com). IGAA-prefixed
-    # tokens generated via "API setup with Instagram login" only work here.
-    base = f"https://graph.instagram.com/v20.0/{IG_USER_ID}"
+def _post(endpoint, data, label):
+    r = requests.post(f"{BASE_URL}/{endpoint}", data=data, timeout=60)
+    print(f"{label} response:", r.status_code, flush=True)
+    print(r.text, flush=True)
+    r.raise_for_status()
+    return r.json()
 
-    # 1. create media container
-    r1 = requests.post(f"{base}/media", data={
+
+def create_carousel_item(image_url):
+    result = _post("media", {
         "image_url": image_url,
+        "is_carousel_item": "true",
+        "access_token": IG_ACCESS_TOKEN,
+    }, "Create carousel item")
+    return result["id"]
+
+
+def create_carousel_container(children_ids, caption):
+    result = _post("media", {
+        "media_type": "CAROUSEL",
+        "children": ",".join(children_ids),
         "caption": caption,
         "access_token": IG_ACCESS_TOKEN,
-    }, timeout=60)
-    print("Create media container response:", r1.status_code, flush=True)
-    print(r1.text, flush=True)
-    r1.raise_for_status()
-    creation_id = r1.json()["id"]
+    }, "Create carousel parent container")
+    return result["id"]
 
-    # give Instagram a moment to fetch/process the image
-    time.sleep(10)
 
-    # 2. publish it
-    r2 = requests.post(f"{base}/media_publish", data={
+def publish_container(creation_id):
+    return _post("media_publish", {
         "creation_id": creation_id,
         "access_token": IG_ACCESS_TOKEN,
-    }, timeout=60)
-    print("Publish response:", r2.status_code, flush=True)
-    print(r2.text, flush=True)
-    r2.raise_for_status()
-    return r2.json()
+    }, "Publish")
+
+
+def post_carousel_to_instagram(image_urls, caption):
+    children_ids = []
+    for url in image_urls:
+        children_ids.append(create_carousel_item(url))
+        time.sleep(3)  # small pause between item creations
+
+    # give Instagram a moment to finish fetching/processing all slides
+    time.sleep(10)
+
+    parent_id = create_carousel_container(children_ids, caption)
+
+    time.sleep(5)
+
+    return publish_container(parent_id)
 
 
 def main():
@@ -71,8 +96,8 @@ def main():
     with open(PENDING_FILE) as f:
         pending = json.load(f)
 
-    result = post_to_instagram(pending["image_url"], pending["caption"])
-    print("Posted to Instagram:", result)
+    result = post_carousel_to_instagram(pending["image_urls"], pending["caption"])
+    print("Posted carousel to Instagram:", result)
 
     posted = load_posted()
     posted.append(pending["link"])
