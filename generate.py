@@ -108,7 +108,9 @@ Write:
 3. image_prompt: max 15 words describing an ABSTRACT visual for this topic
    (no text, no logos, no real people, futuristic/tech aesthetic)
 
-Respond with ONLY valid JSON, no markdown fences, no extra words:
+Respond with ONLY valid JSON, no markdown fences, no extra words.
+Inside the JSON string values, any line break MUST be written as the two
+characters backslash-n (a JSON-escaped newline) — never a literal line break.
 {{"hook_title": "...", "caption": "...", "image_prompt": "..."}}
 """
     resp = requests.post(
@@ -130,7 +132,15 @@ Respond with ONLY valid JSON, no markdown fences, no extra words:
         if text.lower().startswith("json"):
             text = text[4:].strip()
 
-    return json.loads(text)
+    # Groq/Llama sometimes puts literal newlines or other raw control
+    # characters inside JSON string values (e.g. in the caption), which
+    # breaks Python's strict JSON parser. strict=False allows control
+    # characters inside strings instead of raising JSONDecodeError.
+    try:
+        return json.loads(text, strict=False)
+    except json.JSONDecodeError as e:
+        print("Raw model output that failed to parse:\n", text)
+        raise
 
 
 # ---------------------------------------------------------------------------
