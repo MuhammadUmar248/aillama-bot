@@ -33,7 +33,10 @@ def save_posted(posted):
 
 
 def post_to_instagram(image_url, caption):
-    base = f"https://graph.facebook.com/v20.0/{IG_USER_ID}"
+    # Using the Instagram API with Instagram Login (graph.instagram.com),
+    # not the Facebook Login variant (graph.facebook.com). IGAA-prefixed
+    # tokens generated via "API setup with Instagram login" only work here.
+    base = f"https://graph.instagram.com/v20.0/{IG_USER_ID}"
 
     # 1. create media container
     r1 = requests.post(f"{base}/media", data={
