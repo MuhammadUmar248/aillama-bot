@@ -41,6 +41,8 @@ def post_to_instagram(image_url, caption):
         "caption": caption,
         "access_token": IG_ACCESS_TOKEN,
     }, timeout=60)
+    print("Create media container response:", r1.status_code, flush=True)
+    print(r1.text, flush=True)
     r1.raise_for_status()
     creation_id = r1.json()["id"]
 
@@ -52,6 +54,8 @@ def post_to_instagram(image_url, caption):
         "creation_id": creation_id,
         "access_token": IG_ACCESS_TOKEN,
     }, timeout=60)
+    print("Publish response:", r2.status_code, flush=True)
+    print(r2.text, flush=True)
     r2.raise_for_status()
     return r2.json()
 
