@@ -4,9 +4,10 @@ Step 1 of the daily pipeline:
   1. Pull latest AI news from RSS feeds
   2. Skip anything already posted (posted.json)
   3. Ask an LLM (Groq / Llama 3.3) to turn it into a 4-slide carousel script
-     (title, "the story", "why it matters", follow CTA)
-  4. Render all 4 slides on a FIXED brand template (same gradient, fonts,
-     colors every time) with Pillow, so every post looks consistent
+     (title, "what's new" bullets, "why it matters" bullets, follow CTA)
+  4. Render all 4 slides on a FIXED brand template (Poppins font, cream
+     background, teal/gold accents, numbered badges, vector icons — no
+     emoji/glyph dependency) so every post looks consistent
   5. Write pending_post.json describing what still needs to be published
 
 The actual Instagram publish step happens in publish.py, AFTER these images
@@ -17,7 +18,6 @@ import json
 import os
 import textwrap
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
 
 import feedparser
 import requests
@@ -36,9 +36,10 @@ RSS_FEEDS = [
 
 POSTED_FILE = "posted.json"
 IMAGE_DIR = "images"
-
-BOLD_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-REGULAR_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+FONT_DIR = "fonts"
+BOLD_FONT = f"{FONT_DIR}/Poppins-Bold.ttf"
+SEMIBOLD_FONT = f"{FONT_DIR}/Poppins-SemiBold.ttf"
+REGULAR_FONT = f"{FONT_DIR}/Poppins-Regular.ttf"
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")  # e.g. "yourname/aillama-bot"
@@ -48,13 +49,13 @@ LOOKBACK_HOURS = 30  # how far back to consider "fresh" news
 
 # ---- Brand look — kept identical across every slide of every post ----
 IMG_SIZE = 1080
-BG_TOP = (12, 18, 36)        # deep navy
-BG_BOTTOM = (35, 20, 66)     # deep purple
-ACCENT = (255, 209, 102)     # gold
-TEXT_WHITE = (240, 242, 248)
-TEXT_MUTED = (170, 176, 196)
-INSTAGRAM_HANDLE = "@aillama.daily"
-BRAND_LINE = "\U0001F999 AI LLAMA DAILY"
+BG_CREAM = (246, 242, 233)     # #F6F2E9
+TEAL_DARK = (15, 118, 110)     # #0F766E
+TEAL_LIGHT = (20, 184, 166)    # #14B8A6
+GOLD = (245, 158, 11)          # #F59E0B
+SLATE = (100, 116, 139)        # #64748B
+TEXT_DARK = (31, 41, 55)
+BRAND_HANDLE = "aillama.daily"
 
 
 # ---------------------------------------------------------------------------
@@ -114,9 +115,11 @@ News headline: {story['title']}
 Summary: {story['summary']}
 
 Write the carousel script:
-1. hook_title: slide 1 headline, max 7 words, punchy, no hashtags, no period
-2. story_text: slide 2 body, 2-3 short sentences plainly explaining what happened
-3. impact_text: slide 3 body, 2-3 short sentences on why it matters / what's next
+1. hook_title: slide 1 headline, max 6 words, punchy, no hashtags, no period
+2. story_points: a list of exactly 3 short bullet phrases (each under 10 words)
+   plainly explaining what happened, in order of importance
+3. impact_points: a list of exactly 3 short bullet phrases (each under 10 words)
+   on why it matters / what happens next
 4. caption: an Instagram caption (3-5 sentences, engaging, plain language, 1-2 emojis,
    ends with a question), followed by 6-10 relevant hashtags IN THE SAME "caption" STRING
 
@@ -125,7 +128,7 @@ fences, no commentary, no alternate versions, no explanation before or after it.
 Inside the JSON string values, any line break MUST be written as the two
 characters backslash-n (a JSON-escaped newline) — never a literal line break.
 The JSON object must have EXACTLY these four keys, no others:
-{{"hook_title": "...", "story_text": "...", "impact_text": "...", "caption": "..."}}
+{{"hook_title": "...", "story_points": ["...", "...", "..."], "impact_points": ["...", "...", "..."], "caption": "..."}}
 """
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -153,7 +156,7 @@ The JSON object must have EXACTLY these four keys, no others:
         print("Raw model output that failed to parse:\n", text)
         raise
 
-    for key in ("hook_title", "story_text", "impact_text", "caption"):
+    for key in ("hook_title", "story_points", "impact_points", "caption"):
         if key not in obj:
             raise ValueError(f"Model response missing required key '{key}': {obj}")
 
@@ -161,70 +164,114 @@ The JSON object must have EXACTLY these four keys, no others:
 
 
 # ---------------------------------------------------------------------------
-# STEP 3: branded slide rendering (fixed template, Pillow only — no external
-# image API — so every post looks identical in style)
+# STEP 3: branded slide rendering (fixed template, Pillow only, Poppins font,
+# every icon drawn as a vector shape — no emoji/glyph dependency)
 # ---------------------------------------------------------------------------
 
 def brand_canvas():
-    """A fresh 1080x1080 canvas with the same gradient + subtle dot grid
-    every single time, so all slides (and all posts) share one look."""
-    img = Image.new("RGB", (IMG_SIZE, IMG_SIZE))
-    draw = ImageDraw.Draw(img)
-    for y in range(IMG_SIZE):
-        t = y / IMG_SIZE
-        r = int(BG_TOP[0] + (BG_BOTTOM[0] - BG_TOP[0]) * t)
-        g = int(BG_TOP[1] + (BG_BOTTOM[1] - BG_TOP[1]) * t)
-        b = int(BG_TOP[2] + (BG_BOTTOM[2] - BG_TOP[2]) * t)
-        draw.line([(0, y), (IMG_SIZE, y)], fill=(r, g, b))
+    """A fresh 1080x1080 canvas with the same cream background + decorative
+    teal blob + dot grid every time, so all slides share one consistent look."""
+    img = Image.new("RGB", (IMG_SIZE, IMG_SIZE), BG_CREAM)
+
+    blob = Image.new("RGBA", (IMG_SIZE, IMG_SIZE), (0, 0, 0, 0))
+    bdraw = ImageDraw.Draw(blob)
+    bdraw.ellipse([760, -160, 1280, 360], fill=(*TEAL_LIGHT, 35))
+    img.paste(blob, (0, 0), blob)
 
     draw = ImageDraw.Draw(img, "RGBA")
-    spacing = 54
-    for x in range(0, IMG_SIZE, spacing):
-        for y in range(0, IMG_SIZE, spacing):
-            draw.ellipse([x, y, x + 2, y + 2], fill=(255, 255, 255, 22))
+    for gx in range(6):
+        for gy in range(5):
+            x = 60 + gx * 26
+            y = 880 + gy * 26
+            draw.ellipse([x, y, x + 5, y + 5], fill=(*TEAL_DARK, 70))
 
     return img
 
 
-def draw_footer(draw, page_label):
-    footer_font = ImageFont.truetype(BOLD_FONT_PATH, 30)
-    page_font = ImageFont.truetype(REGULAR_FONT_PATH, 26)
-    draw.text((60, IMG_SIZE - 70), BRAND_LINE, font=footer_font, fill=ACCENT)
-    bbox = draw.textbbox((0, 0), page_label, font=page_font)
-    w = bbox[2] - bbox[0]
-    draw.text((IMG_SIZE - 60 - w, IMG_SIZE - 66), page_label, font=page_font, fill=TEXT_MUTED)
+def draw_number_badge(draw, number):
+    draw.ellipse([60, 60, 140, 140], fill=TEAL_DARK)
+    font = ImageFont.truetype(BOLD_FONT, 38)
+    text = str(number)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text((100 - w / 2, 100 - h / 2 - bbox[1]), text, font=font, fill=(255, 255, 255))
+
+
+def draw_kicker(draw, text):
+    font = ImageFont.truetype(SEMIBOLD_FONT, 32)
+    draw.text((162, 82), text.upper(), font=font, fill=TEAL_DARK)
+
+
+def draw_brand_mark(draw, x, y):
+    draw.ellipse([x, y, x + 34, y + 34], fill=TEAL_DARK)
+    font = ImageFont.truetype(BOLD_FONT, 18)
+    bbox = draw.textbbox((0, 0), "A", font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text((x + 17 - w / 2, y + 17 - h / 2 - bbox[1]), "A", font=font, fill=(255, 255, 255))
+
+
+def draw_footer(draw, show_swipe):
+    draw_brand_mark(draw, 60, 988)
+    font = ImageFont.truetype(SEMIBOLD_FONT, 28)
+    draw.text((104, 992), BRAND_HANDLE, font=font, fill=SLATE)
+
+    if show_swipe:
+        hint_font = ImageFont.truetype(SEMIBOLD_FONT, 28)
+        text = "SWIPE"
+        bbox = draw.textbbox((0, 0), text, font=hint_font)
+        w = bbox[2] - bbox[0]
+        tx = IMG_SIZE - 60 - w - 26
+        draw.text((tx, 992), text, font=hint_font, fill=GOLD)
+        ax, ay = IMG_SIZE - 60 - 16, 1006
+        draw.polygon([(ax - 12, ay - 9), (ax - 12, ay + 9), (ax + 6, ay)], fill=GOLD)
+
+
+def draw_bullets(draw, items, start_y, max_width_chars=30):
+    body_font = ImageFont.truetype(REGULAR_FONT, 40)
+    y = start_y
+    for item in items:
+        draw.ellipse([60, y + 6, 92, y + 38], fill=GOLD)
+        cx, cy = 76, y + 22
+        draw.line([(cx - 8, cy), (cx - 2, cy + 7), (cx + 10, cy - 9)],
+                  fill=(255, 255, 255), width=4, joint="curve")
+
+        wrapped = textwrap.fill(item, width=max_width_chars)
+        draw.multiline_text((116, y), wrapped, font=body_font, fill=TEXT_DARK, spacing=10)
+
+        line_count = wrapped.count("\n") + 1
+        y += line_count * 52 + 34
+    return y
 
 
 def slide_title(hook_title):
     img = brand_canvas()
     draw = ImageDraw.Draw(img, "RGBA")
 
-    kicker_font = ImageFont.truetype(BOLD_FONT_PATH, 34)
-    title_font = ImageFont.truetype(BOLD_FONT_PATH, 84)
+    draw_number_badge(draw, 1)
+    draw_kicker(draw, "AI News Brief")
 
-    draw.text((60, 300), "AI NEWS BRIEF", font=kicker_font, fill=ACCENT)
+    title_font = ImageFont.truetype(BOLD_FONT, 78)
+    wrapped = textwrap.fill(hook_title, width=15)
+    draw.multiline_text((60, 340), wrapped, font=title_font, fill=TEXT_DARK, spacing=14)
 
-    wrapped = textwrap.fill(hook_title.upper(), width=14)
-    draw.multiline_text((60, 370), wrapped, font=title_font, fill=TEXT_WHITE, spacing=16)
-
-    draw_footer(draw, "1/4")
+    draw_footer(draw, show_swipe=True)
     return img
 
 
-def slide_body(heading, body_text, page_label):
+def slide_bullets(number, kicker, heading, items):
     img = brand_canvas()
     draw = ImageDraw.Draw(img, "RGBA")
 
-    heading_font = ImageFont.truetype(BOLD_FONT_PATH, 46)
-    body_font = ImageFont.truetype(REGULAR_FONT_PATH, 46)
+    draw_number_badge(draw, number)
+    draw_kicker(draw, kicker)
 
-    draw.text((60, 140), heading.upper(), font=heading_font, fill=ACCENT)
-    draw.line([(60, 210), (280, 210)], fill=ACCENT, width=4)
+    heading_font = ImageFont.truetype(BOLD_FONT, 56)
+    draw.text((60, 200), heading, font=heading_font, fill=TEXT_DARK)
+    draw.line([(60, 280), (240, 280)], fill=GOLD, width=5)
 
-    wrapped = textwrap.fill(body_text, width=26)
-    draw.multiline_text((60, 280), wrapped, font=body_font, fill=TEXT_WHITE, spacing=18)
+    draw_bullets(draw, items, start_y=340)
 
-    draw_footer(draw, page_label)
+    draw_footer(draw, show_swipe=(number < 4))
     return img
 
 
@@ -232,23 +279,36 @@ def slide_follow():
     img = brand_canvas()
     draw = ImageDraw.Draw(img, "RGBA")
 
-    llama_font = ImageFont.truetype(BOLD_FONT_PATH, 140)
-    cta_font = ImageFont.truetype(BOLD_FONT_PATH, 58)
-    handle_font = ImageFont.truetype(REGULAR_FONT_PATH, 40)
+    draw_number_badge(draw, 4)
+    draw_kicker(draw, "Stay Updated")
 
-    draw.text((IMG_SIZE / 2 - 90, 320), "\U0001F999", font=llama_font, fill=ACCENT)
+    cx, cy, r = IMG_SIZE / 2, 470, 110
+    draw.ellipse([cx - r - 14, cy - r - 14, cx + r + 14, cy + r + 14], outline=GOLD, width=6)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=TEAL_DARK)
+    emblem_font = ImageFont.truetype(BOLD_FONT, 76)
+    bbox0 = draw.textbbox((0, 0), "AI", font=emblem_font)
+    w0, h0 = bbox0[2] - bbox0[0], bbox0[3] - bbox0[1]
+    draw.text((cx - w0 / 2, cy - h0 / 2 - bbox0[1]), "AI", font=emblem_font, fill=(255, 255, 255))
 
-    cta_wrapped = textwrap.fill("FOLLOW FOR DAILY AI NEWS", width=14)
-    bbox = draw.multiline_textbbox((0, 0), cta_wrapped, font=cta_font, align="center")
-    w = bbox[2] - bbox[0]
-    draw.multiline_text(((IMG_SIZE - w) / 2, 520), cta_wrapped, font=cta_font,
-                         fill=TEXT_WHITE, spacing=14, align="center")
-
-    bbox2 = draw.textbbox((0, 0), INSTAGRAM_HANDLE, font=handle_font)
+    heading_font = ImageFont.truetype(BOLD_FONT, 58)
+    text = "FOLLOW FOR DAILY\nAI NEWS"
+    bbox2 = draw.multiline_textbbox((0, 0), text, font=heading_font, align="center")
     w2 = bbox2[2] - bbox2[0]
-    draw.text(((IMG_SIZE - w2) / 2, 660), INSTAGRAM_HANDLE, font=handle_font, fill=ACCENT)
+    draw.multiline_text(((IMG_SIZE - w2) / 2, 640), text, font=heading_font,
+                         fill=TEXT_DARK, align="center", spacing=12)
 
-    draw_footer(draw, "4/4")
+    handle_font = ImageFont.truetype(SEMIBOLD_FONT, 40)
+    pill_text = f"Follow @{BRAND_HANDLE}"
+    bbox3 = draw.textbbox((0, 0), pill_text, font=handle_font)
+    pw = bbox3[2] - bbox3[0]
+    pad_x, pad_y = 44, 22
+    pill_w, pill_h = pw + pad_x * 2, 40 + pad_y * 2
+    px0 = (IMG_SIZE - pill_w) / 2
+    py0 = 830
+    draw.rounded_rectangle([px0, py0, px0 + pill_w, py0 + pill_h], radius=pill_h / 2, fill=TEAL_DARK)
+    draw.text((px0 + pad_x, py0 + pad_y - 4), pill_text, font=handle_font, fill=(255, 255, 255))
+
+    draw_footer(draw, show_swipe=False)
     return img
 
 
@@ -272,8 +332,8 @@ def main():
 
     slides = [
         slide_title(content["hook_title"]),
-        slide_body("The Story", content["story_text"], "2/4"),
-        slide_body("Why It Matters", content["impact_text"], "3/4"),
+        slide_bullets(2, "What's New", "The Story", content["story_points"]),
+        slide_bullets(3, "Why It Matters", "Why It Matters", content["impact_points"]),
         slide_follow(),
     ]
 
