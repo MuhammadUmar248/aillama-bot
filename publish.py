@@ -78,8 +78,7 @@ def post_carousel_to_instagram(image_urls, caption):
         children_ids.append(create_carousel_item(url))
         time.sleep(3)  # small pause between item creations
 
-    # give Instagram a moment to finish fetching/processing all slides
-    time.sleep(10)
+    time.sleep(10)  # give Instagram a moment to finish processing all slides
 
     parent_id = create_carousel_container(children_ids, caption)
 
@@ -101,7 +100,7 @@ def main():
 
     posted = load_posted()
     posted.append(pending["link"])
-    posted = posted[-500:]  # cap the log so it doesn't grow forever
+    posted = posted[-500:]
     save_posted(posted)
 
     os.remove(PENDING_FILE)
