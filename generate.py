@@ -115,20 +115,33 @@ News headline: {story['title']}
 Summary: {story['summary']}
 
 Write the carousel script:
-1. hook_title: slide 1 headline, max 6 words, punchy, no hashtags, no period
+1. hook_title: slide 1 headline, max 9 words, no hashtags, no period.
+   Write it like a scroll-stopping news hook — specific, concrete, creates a
+   curiosity gap (readers want to know more). Use a real detail from the
+   story (a name, number, or specific claim) instead of a generic phrase.
+   Example style: "ChatGPT Just Broke a Coding Record" or
+   "This AI Model Fooled Every Test It Took" — NOT generic phrases like
+   "AI News Update" or "New AI Development".
 2. story_points: a list of exactly 3 short bullet phrases (each under 10 words)
    plainly explaining what happened, in order of importance
 3. impact_points: a list of exactly 3 short bullet phrases (each under 10 words)
    on why it matters / what happens next
-4. caption: an Instagram caption (3-5 sentences, engaging, plain language, 1-2 emojis,
-   ends with a question), followed by 6-10 relevant hashtags IN THE SAME "caption" STRING
+4. caption_paragraphs: a list of 3-4 SHORT strings, each one paragraph of an
+   Instagram caption (1-2 sentences each), engaging, plain language, together
+   telling the story and ending with a question to invite comments. Include
+   1-2 emojis total across the paragraphs, not every paragraph.
+5. hashtags: a list of exactly 8 hashtag words (no # symbol, no spaces, use
+   CamelCase for multi-word tags). Pull most of them from SPECIFIC entities,
+   products, companies, or technical terms actually named in this story
+   (e.g. the model name, company name, technology). Include at most 2 broad
+   generic AI tags (like ArtificialIntelligence or AINews) and make the rest
+   specific and directly relevant to this story — not generic filler
+   unrelated to the actual content.
 
 Respond with ONLY a single valid JSON object and nothing else — no markdown
 fences, no commentary, no alternate versions, no explanation before or after it.
-Inside the JSON string values, any line break MUST be written as the two
-characters backslash-n (a JSON-escaped newline) — never a literal line break.
-The JSON object must have EXACTLY these four keys, no others:
-{{"hook_title": "...", "story_points": ["...", "...", "..."], "impact_points": ["...", "...", "..."], "caption": "..."}}
+The JSON object must have EXACTLY these five keys, no others:
+{{"hook_title": "...", "story_points": ["...", "...", "..."], "impact_points": ["...", "...", "..."], "caption_paragraphs": ["...", "...", "..."], "hashtags": ["...", "...", "..."]}}
 """
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -136,7 +149,7 @@ The JSON object must have EXACTLY these four keys, no others:
         json={
             "model": "llama-3.3-70b-versatile",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.6,
+            "temperature": 0.7,
             "response_format": {"type": "json_object"},
         },
         timeout=60,
@@ -156,11 +169,25 @@ The JSON object must have EXACTLY these four keys, no others:
         print("Raw model output that failed to parse:\n", text)
         raise
 
-    for key in ("hook_title", "story_points", "impact_points", "caption"):
+    for key in ("hook_title", "story_points", "impact_points", "caption_paragraphs", "hashtags"):
         if key not in obj:
             raise ValueError(f"Model response missing required key '{key}': {obj}")
 
     return obj
+
+
+def assemble_caption(content):
+    """Join caption_paragraphs with real blank-line breaks, then the
+    hashtags on their own line at the end. Building this in Python (rather
+    than asking the LLM to hand-escape newlines inside one JSON string)
+    avoids the literal backslash-n text bug entirely."""
+    paragraphs = [p.strip() for p in content["caption_paragraphs"] if p.strip()]
+    body = "\n\n".join(paragraphs)
+
+    tags = [t.strip().lstrip("#") for t in content["hashtags"] if t.strip()]
+    hashtag_line = " ".join(f"#{t}" for t in tags)
+
+    return f"{body}\n\n{hashtag_line}"
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +376,7 @@ def main():
     with open("pending_post.json", "w") as f:
         json.dump({
             "link": story["link"],
-            "caption": content["caption"],
+            "caption": assemble_caption(content),
             "image_urls": image_urls,
         }, f, indent=2)
 
