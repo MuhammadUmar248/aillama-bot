@@ -21,34 +21,39 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      - name: Generate content + image
+      - name: Fetch Poppins font files
+        run: |
+          mkdir -p fonts
+          curl -sSL -o fonts/Poppins-Bold.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Bold.ttf"
+          curl -sSL -o fonts/Poppins-SemiBold.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-SemiBold.ttf"
+          curl -sSL -o fonts/Poppins-Regular.ttf "https://raw.githubusercontent.com/google/fonts/main/ofl/poppins/Poppins-Regular.ttf"
+
+      - name: Generate content + slides
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
         run: python generate.py
 
-      - name: Commit generated image
+      - name: Commit generated slides
         run: |
           git config user.name "aillama-bot"
           git config user.email "actions@github.com"
           if [ -f pending_post.json ]; then
             git add images/ pending_post.json
-            git commit -m "Add daily post image [skip ci]" || echo "Nothing to commit"
+            git commit -m "Add daily carousel slides [skip ci]" || echo "Nothing to commit"
             git push
           else
             echo "No new post generated today."
           fi
 
-      - name: Wait for raw.githubusercontent.com to serve the new image
+      - name: Wait for raw.githubusercontent.com to serve the new images
         if: hashFiles('pending_post.json') != ''
         run: sleep 20
 
-      - name: Publish to Instagram
+      - name: Publish carousel to Instagram
         if: hashFiles('pending_post.json') != ''
         env:
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
