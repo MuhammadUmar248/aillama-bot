@@ -155,7 +155,7 @@ The JSON object must have EXACTLY these six keys, no others:
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         json={
-            "model": "llama-3.3-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.7,
             "response_format": {"type": "json_object"},
