@@ -33,6 +33,7 @@ jobs:
       - name: Generate content + slides
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          UNSPLASH_ACCESS_KEY: ${{ secrets.UNSPLASH_ACCESS_KEY }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
         run: python generate.py
