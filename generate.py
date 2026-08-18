@@ -42,6 +42,7 @@ SEMIBOLD_FONT = f"{FONT_DIR}/Poppins-SemiBold.ttf"
 REGULAR_FONT = f"{FONT_DIR}/Poppins-Regular.ttf"
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
 GITHUB_REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "")  # e.g. "yourname/aillama-bot"
 BRANCH = os.environ.get("BRANCH", "main")
 
@@ -122,15 +123,22 @@ Write the carousel script:
    Example style: "ChatGPT Just Broke a Coding Record" or
    "This AI Model Fooled Every Test It Took" — NOT generic phrases like
    "AI News Update" or "New AI Development".
-2. story_points: a list of exactly 3 short bullet phrases (each under 10 words)
-   plainly explaining what happened, in order of importance
-3. impact_points: a list of exactly 3 short bullet phrases (each under 10 words)
-   on why it matters / what happens next
-4. caption_paragraphs: a list of 3-4 SHORT strings, each one paragraph of an
+2. image_query: 3-5 words describing a GENERIC stock-photo scene that fits
+   this story's theme for a photo search — e.g. "robotics lab technology",
+   "data center servers", "person coding laptop", "self driving car street".
+   Never include a real person's name, company logo, or brand name here —
+   describe a generic scene/subject only, since this drives a stock photo
+   search.
+3. story_points: a list of exactly 3 bullet phrases (9-13 words each, one
+   full clear sentence), plainly explaining what happened, with enough
+   detail to be genuinely informative on their own — not just a fragment
+4. impact_points: a list of exactly 3 bullet phrases (9-13 words each, one
+   full clear sentence) on why it matters / what happens next, similarly detailed
+5. caption_paragraphs: a list of 3-4 SHORT strings, each one paragraph of an
    Instagram caption (1-2 sentences each), engaging, plain language, together
    telling the story and ending with a question to invite comments. Include
    1-2 emojis total across the paragraphs, not every paragraph.
-5. hashtags: a list of exactly 8 hashtag words (no # symbol, no spaces, use
+6. hashtags: a list of exactly 8 hashtag words (no # symbol, no spaces, use
    CamelCase for multi-word tags). Pull most of them from SPECIFIC entities,
    products, companies, or technical terms actually named in this story
    (e.g. the model name, company name, technology). Include at most 2 broad
@@ -140,8 +148,8 @@ Write the carousel script:
 
 Respond with ONLY a single valid JSON object and nothing else — no markdown
 fences, no commentary, no alternate versions, no explanation before or after it.
-The JSON object must have EXACTLY these five keys, no others:
-{{"hook_title": "...", "story_points": ["...", "...", "..."], "impact_points": ["...", "...", "..."], "caption_paragraphs": ["...", "...", "..."], "hashtags": ["...", "...", "..."]}}
+The JSON object must have EXACTLY these six keys, no others:
+{{"hook_title": "...", "image_query": "...", "story_points": ["...", "...", "..."], "impact_points": ["...", "...", "..."], "caption_paragraphs": ["...", "...", "..."], "hashtags": ["...", "...", "..."]}}
 """
     resp = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
@@ -169,7 +177,7 @@ The JSON object must have EXACTLY these five keys, no others:
         print("Raw model output that failed to parse:\n", text)
         raise
 
-    for key in ("hook_title", "story_points", "impact_points", "caption_paragraphs", "hashtags"):
+    for key in ("hook_title", "image_query", "story_points", "impact_points", "caption_paragraphs", "hashtags"):
         if key not in obj:
             raise ValueError(f"Model response missing required key '{key}': {obj}")
 
@@ -197,7 +205,9 @@ def assemble_caption(content):
 
 def brand_canvas():
     """A fresh 1080x1080 canvas with the same cream background + decorative
-    teal blob + dot grid every time, so all slides share one consistent look."""
+    teal blob + dot grid every time, so all slides share one consistent look.
+    All decoration lives in the top-right corner so it never collides with
+    variable-length body text, which always renders bottom-left."""
     img = Image.new("RGB", (IMG_SIZE, IMG_SIZE), BG_CREAM)
 
     blob = Image.new("RGBA", (IMG_SIZE, IMG_SIZE), (0, 0, 0, 0))
@@ -206,11 +216,11 @@ def brand_canvas():
     img.paste(blob, (0, 0), blob)
 
     draw = ImageDraw.Draw(img, "RGBA")
-    for gx in range(6):
+    for gx in range(5):
         for gy in range(5):
-            x = 60 + gx * 26
-            y = 880 + gy * 26
-            draw.ellipse([x, y, x + 5, y + 5], fill=(*TEAL_DARK, 70))
+            x = 840 + gx * 26
+            y = 40 + gy * 26
+            draw.ellipse([x, y, x + 5, y + 5], fill=(*TEAL_DARK, 55))
 
     return img
 
@@ -253,10 +263,68 @@ def draw_footer(draw, show_swipe):
         draw.polygon([(ax - 12, ay - 9), (ax - 12, ay + 9), (ax + 6, ay)], fill=GOLD)
 
 
-def draw_bullets(draw, items, start_y, max_width_chars=30):
+def fetch_cover_photo(query):
+    """Fetch a relevant, freely-licensed stock photo from Unsplash for the
+    story's topic. Returns a local file path, or None if unavailable (no
+    API key set, request failed, etc.) so the caller can fall back cleanly."""
+    if not UNSPLASH_ACCESS_KEY:
+        print("No UNSPLASH_ACCESS_KEY set — using fallback cover design.")
+        return None
+    try:
+        resp = requests.get(
+            "https://api.unsplash.com/photos/random",
+            params={
+                "query": query,
+                "orientation": "squarish",
+                "content_filter": "high",
+            },
+            headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        photo_url = resp.json()["urls"]["regular"]
+
+        img_resp = requests.get(photo_url, timeout=30)
+        img_resp.raise_for_status()
+
+        path = "cover_photo.jpg"
+        with open(path, "wb") as f:
+            f.write(img_resp.content)
+        return path
+    except Exception as e:
+        print("Unsplash fetch failed, using fallback cover design:", e)
+        return None
+
+
+def draw_footer_on_photo(draw, show_swipe):
+    """Same footer as draw_footer, but light-colored for a dark photo bg."""
+    draw.ellipse([60, 988, 94, 1022], fill=(255, 255, 255))
+    font_a = ImageFont.truetype(BOLD_FONT, 18)
+    bbox_a = draw.textbbox((0, 0), "A", font=font_a)
+    w, h = bbox_a[2] - bbox_a[0], bbox_a[3] - bbox_a[1]
+    draw.text((77 - w / 2, 1005 - h / 2 - bbox_a[1]), "A", font=font_a, fill=TEAL_DARK)
+
+    font = ImageFont.truetype(SEMIBOLD_FONT, 28)
+    draw.text((104, 992), BRAND_HANDLE, font=font, fill=(255, 255, 255))
+
+    if show_swipe:
+        hint_font = ImageFont.truetype(SEMIBOLD_FONT, 28)
+        text = "SWIPE"
+        bbox = draw.textbbox((0, 0), text, font=hint_font)
+        w2 = bbox[2] - bbox[0]
+        tx = IMG_SIZE - 60 - w2 - 26
+        draw.text((tx, 992), text, font=hint_font, fill=GOLD)
+        ax, ay = IMG_SIZE - 60 - 16, 1006
+        draw.polygon([(ax - 12, ay - 9), (ax - 12, ay + 9), (ax + 6, ay)], fill=GOLD)
+
+
+def draw_bullets(draw, items, start_y, max_width_chars=34):
     body_font = ImageFont.truetype(REGULAR_FONT, 40)
+    max_y = 960  # never draw past this — keeps clear of the footer at y=988
     y = start_y
     for item in items:
+        if y > max_y:
+            break
         draw.ellipse([60, y + 6, 92, y + 38], fill=GOLD)
         cx, cy = 76, y + 22
         draw.line([(cx - 8, cy), (cx - 2, cy + 7), (cx + 10, cy - 9)],
@@ -266,21 +334,57 @@ def draw_bullets(draw, items, start_y, max_width_chars=30):
         draw.multiline_text((116, y), wrapped, font=body_font, fill=TEXT_DARK, spacing=10)
 
         line_count = wrapped.count("\n") + 1
-        y += line_count * 52 + 34
+        y += line_count * 50 + 30
     return y
 
 
-def slide_title(hook_title):
+def slide_title(hook_title, image_query):
+    photo_path = fetch_cover_photo(image_query)
+
+    if photo_path:
+        img = Image.open(photo_path).convert("RGB")
+        # crop to square, centered
+        w, h = img.size
+        side = min(w, h)
+        img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
+        img = img.resize((IMG_SIZE, IMG_SIZE)).convert("RGBA")
+
+        # dark gradient overlay, stronger toward the bottom, for text legibility
+        overlay = Image.new("RGBA", (IMG_SIZE, IMG_SIZE), (0, 0, 0, 0))
+        odraw = ImageDraw.Draw(overlay)
+        for y in range(IMG_SIZE):
+            t = y / IMG_SIZE
+            alpha = int(60 + 150 * t)
+            odraw.line([(0, y), (IMG_SIZE, y)], fill=(10, 12, 20, alpha))
+        img = Image.alpha_composite(img, overlay).convert("RGB")
+        draw = ImageDraw.Draw(img, "RGBA")
+
+        # semi-transparent badge/kicker chip so they read on any photo
+        draw.ellipse([60, 60, 140, 140], fill=(*TEAL_DARK, 235))
+        font = ImageFont.truetype(BOLD_FONT, 38)
+        bbox = draw.textbbox((0, 0), "1", font=font)
+        w2, h2 = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        draw.text((100 - w2 / 2, 100 - h2 / 2 - bbox[1]), "1", font=font, fill=(255, 255, 255))
+
+        kicker_font = ImageFont.truetype(SEMIBOLD_FONT, 32)
+        draw.text((162, 82), "AI NEWS BRIEF", font=kicker_font, fill=GOLD)
+
+        title_font = ImageFont.truetype(BOLD_FONT, 74)
+        wrapped = textwrap.fill(hook_title, width=16)
+        draw.multiline_text((60, IMG_SIZE - 420), wrapped, font=title_font,
+                             fill=(255, 255, 255), spacing=14)
+
+        draw_footer_on_photo(draw, show_swipe=True)
+        return img
+
+    # fallback: same cream template used elsewhere, if no photo available
     img = brand_canvas()
     draw = ImageDraw.Draw(img, "RGBA")
-
     draw_number_badge(draw, 1)
     draw_kicker(draw, "AI News Brief")
-
     title_font = ImageFont.truetype(BOLD_FONT, 78)
     wrapped = textwrap.fill(hook_title, width=15)
     draw.multiline_text((60, 340), wrapped, font=title_font, fill=TEXT_DARK, spacing=14)
-
     draw_footer(draw, show_swipe=True)
     return img
 
@@ -358,7 +462,7 @@ def main():
     print("Generated content:", content)
 
     slides = [
-        slide_title(content["hook_title"]),
+        slide_title(content["hook_title"], content["image_query"]),
         slide_bullets(2, "What's New", "The Story", content["story_points"]),
         slide_bullets(3, "Why It Matters", "Why It Matters", content["impact_points"]),
         slide_follow(),
