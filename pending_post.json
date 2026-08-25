@@ -1,0 +1,10 @@
+{
+  "link": "https://arxiv.org/abs/2608.21362",
+  "caption": "A new system called KVBoost slashes the lag you feel when LLMs start answering.\n\nBy caching chunks of key\u2011value data and fixing boundary errors, it speeds up responses up to 4.5\u00d7 \ud83d\ude80.\n\nWhat AI applications could you accelerate with this kind of cache boost?\n\n#KVBoost #Qwen2_5 #RoPE #DualHash #CacheBlendRecompute #SelectiveRecompute #ArtificialIntelligence #AINews",
+  "image_urls": [
+    "https://raw.githubusercontent.com/MuhammadUmar248/aillama-bot/main/images/20260825_093039_1.png",
+    "https://raw.githubusercontent.com/MuhammadUmar248/aillama-bot/main/images/20260825_093039_2.png",
+    "https://raw.githubusercontent.com/MuhammadUmar248/aillama-bot/main/images/20260825_093039_3.png",
+    "https://raw.githubusercontent.com/MuhammadUmar248/aillama-bot/main/images/20260825_093039_4.png"
+  ]
+}
